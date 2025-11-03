@@ -1,0 +1,85 @@
+# ComfyUI-WithAnyone
+
+This repository is a **ComfyUI port** of the **WithAnyone** model introduced in the paper  
+> [WithAnyone: Towards Controllable and ID-Consistent Image Generation (2025)](https://arxiv.org/abs/2510.14975)
+
+Original implementation: [Doby-Xu/WithAnyone](https://github.com/Doby-Xu/WithAnyone).  
+Huge thanks and congratulations to the authors for their excellent work and for releasing it as open source.
+
+---
+
+## 🧩 Installation
+
+Clone this repository under your ComfyUI custom nodes directory:
+
+```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/okdalto/ComfyUI-WithAnyone
+cd ComfyUI-WithAnyone
+pip install -r requirements.txt
+```
+
+---
+
+## 📦 Model Setup
+
+### 1. Text Encoder Models
+
+Go to `ComfyUI/models/clip` and download the following:
+
+```bash
+wget https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors
+wget https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors
+```
+
+### 2. Diffusion Models
+
+Go to `ComfyUI/models/diffusion_models` and download:
+
+```bash
+wget https://huggingface.co/bstungnguyen/Flux/resolve/main/flux1-dev.safetensors
+wget https://huggingface.co/WithAnyone/WithAnyone/resolve/main/withanyone.safetensors
+```
+
+### 3. VAE Model
+
+Go to `ComfyUI/models/vae` and download:
+
+```bash
+wget https://huggingface.co/bstungnguyen/Flux/resolve/main/vae/diffusion_pytorch_model.safetensors
+```
+
+### 4. SigLIP Model
+
+Go to `ComfyUI/models/diffusers` and download the multilingual SigLIP model:
+
+```bash
+apt update
+apt install git-lfs -y
+git lfs install
+git clone https://huggingface.co/google/siglip-base-patch16-256-multilingual
+```
+
+---
+
+## ⚠️ Important Note
+
+The `WithAnyone Model Loader` will automatically download the **ArcFace** model into  
+`ComfyUI/custom_nodes/ComfyUI-WithAnyone/models/`.
+
+However, there is a known issue:  
+If you encounter an error such as:
+
+```
+assert 'detection' in self.models
+```
+
+please manually move the downloaded model directory to the correct location under the path above.
+
+---
+
+## 🚧 TODO
+
+- Currently, this ComfyUI version only supports **single-person** image generation,  
+  while the original WithAnyone model supports **multi-person** scenarios.
+- **Flux Kontext** model support has not yet been tested.
