@@ -1,5 +1,7 @@
 # ComfyUI-WithAnyone
 
+![Preview](https://github.com/okdalto/ComfyUI-WithAnyone/raw/main/assets/preview.jpg)
+
 This repository is a **ComfyUI port** of the **WithAnyone** model introduced in the paper  
 > [WithAnyone: Towards Controllable and ID-Consistent Image Generation (2025)](https://arxiv.org/abs/2510.14975)
 
