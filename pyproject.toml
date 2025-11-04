@@ -1,5 +1,5 @@
 [project]
-name = "withanyone"
+name = "ComfyUI-WithAnyone"
 description = "This repository is a ComfyUI port of the WithAnyone model introduced in the paper.\n[a/WithAnyone: Towards Controllable and ID-Consistent Image Generation (2025)](https://arxiv.org/abs/2510.14975)\nOriginal implementation: [a/Doby-Xu/WithAnyone](https://github.com/Doby-Xu/WithAnyone)."
 version = "1.0.0"
 license = {file = "LICENSE"} 
@@ -29,7 +29,7 @@ Documentation = "https://github.com/okdalto/ComfyUI-WithAnyone/wiki"
 "Bug Tracker" = "https://github.com/okdalto/ComfyUI-WithAnyone/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "seonghyeon"
 DisplayName = "ComfyUI-WithAnyone"
 Icon = ""
 includes = [] 
