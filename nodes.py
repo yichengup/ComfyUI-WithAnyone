@@ -282,8 +282,17 @@ class WithAnyoneModelLoaderNode:
         flux_path = os.path.join(folder_paths.models_dir, "diffusion_models", flux_name)
         siglip_path = os.path.join(folder_paths.models_dir, "diffusers", siglip_name)
 
+        # Monitor initial memory
+        if torch.cuda.is_available():
+            initial_memory = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"Initial GPU memory usage: {initial_memory:.2f} GB")
+
         mm.soft_empty_cache()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
         try:
+            # Initialize face extractor first (smaller model)
+            logger.info("Loading FaceExtractor...")
             face_extractor = FaceExtractor(model_path="./custom_nodes/ComfyUI-WithAnyone")
         except AssertionError as e:
             import shutil
@@ -316,12 +325,32 @@ class WithAnyoneModelLoaderNode:
                 logger.error(f"❌ Source folder not found: {src}")
                 raise e
 
+        if torch.cuda.is_available():
+            after_face_extractor = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"Memory after FaceExtractor: {after_face_extractor:.2f} GB (+{after_face_extractor-initial_memory:.2f} GB)")
+
+        # Clear cache before loading next model
+        mm.soft_empty_cache()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Load SiglipEmbedding with optimizations
+        logger.info("Loading SiglipEmbedding...")
         siglip = SiglipEmbedding(siglip_path=siglip_path)
+
+        if torch.cuda.is_available():
+            after_siglip = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"Memory after SiglipEmbedding: {after_siglip:.2f} GB (+{after_siglip-after_face_extractor:.2f} GB)")
+        # Clear cache before loading main pipeline
+        mm.soft_empty_cache()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Load main pipeline with memory optimizations
+        logger.info("Loading WithAnyonePipeline...")
         pipeline = WithAnyonePipeline(
             "flux-dev",
             ipa_path,
             mm.get_torch_device(),
-            False,
+            False,  # Temporarily disable offload to fix device mismatch issues
             only_lora=True,
             no_lora=True,
             lora_rank=64,
@@ -330,6 +359,12 @@ class WithAnyoneModelLoaderNode:
             flux_path=flux_path,
             # siglip_path=siglip_path,
         )
+
+        if torch.cuda.is_available():
+            final_memory = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"Final GPU memory usage: {final_memory:.2f} GB (+{final_memory-after_siglip:.2f} GB)")
+            logger.info(f"Total memory increase: {final_memory-initial_memory:.2f} GB")
+
         return ({"pipeline": pipeline, "face_extractor": face_extractor, "siglip": siglip},)
 
 
@@ -354,6 +389,9 @@ class WithAnyoneSinglePersonConditioningNode:
             },
             "optional": {
                 "bbox": ("STRING", {"default": "", "multiline": False}),
+                "canvas_width": ("INT", {"default": 512, "min": 64, "max": 4096}),
+                "canvas_height": ("INT", {"default": 512, "min": 64, "max": 4096}),
+                "canvas_bbox": ("STRING", {"default": "", "multiline": False}),
             }
         }
     
@@ -363,7 +401,7 @@ class WithAnyoneSinglePersonConditioningNode:
     FUNCTION = "main"
     TITLE = "WithAnyone Single Person Conditioning"
 
-    def main(self, withAnyone_pipeline, ref_img, bbox=""):
+    def main(self, withAnyone_pipeline, ref_img, bbox="", canvas_width=512, canvas_height=512, canvas_bbox=""):
         # Convert ref_img to PIL
         if ref_img.ndim == 4:
             pil_img = comfy_tensor_to_pil(ref_img[0:1])
@@ -407,6 +445,25 @@ class WithAnyoneSinglePersonConditioningNode:
             except Exception as e:
                 logger.error(f"Error parsing bbox: {e}")
                 raise Exception(f"Invalid bbox format. Expected 'x1_ratio,y1_ratio,x2_ratio,y2_ratio' (0-1 range), got: {bbox}")
+        # Parse canvas_bbox if provided (x,y,width,height format)
+        elif canvas_bbox and canvas_bbox.strip():
+            try:
+                coords = [int(x.strip()) for x in canvas_bbox.strip().split(",")]
+                if len(coords) != 4:
+                    raise ValueError("Canvas BBox must have exactly 4 values: x,y,width,height")
+
+                # Convert from (x,y,width,height) to (x1_ratio,y1_ratio,x2_ratio,y2_ratio)
+                x, y, width, height = coords
+                x1_ratio = x / canvas_width
+                y1_ratio = y / canvas_height
+                x2_ratio = (x + width) / canvas_width
+                y2_ratio = (y + height) / canvas_height
+
+                bbox_list = [x1_ratio, y1_ratio, x2_ratio, y2_ratio]
+                logger.info(f"Converted canvas bbox to relative coordinates: {bbox_list}")
+            except Exception as e:
+                logger.error(f"Error parsing canvas bbox: {e}")
+                raise Exception(f"Invalid canvas bbox format. Expected 'x,y,width,height', got: {canvas_bbox}")
 
         # Create debug image if bbox is provided
         if bbox_list:
@@ -554,9 +611,16 @@ class WithAnyoneSamplerNode:
         # Concatenate embeddings along num_refs dimension
         # arcface: (num_persons, 512)
         arcface_embeddings = torch.cat(arcface_embeddings_list, dim=0)
+        # Ensure arcface_embeddings is on correct device
+        device = mm.get_torch_device()
+        if arcface_embeddings.device != device:
+            arcface_embeddings = arcface_embeddings.to(device)
         
         # siglip: (num_persons, 256, 768)
         siglip_embeddings = torch.cat(siglip_embeddings_list, dim=0)
+        # Ensure siglip_embeddings is on correct device
+        if siglip_embeddings.device != device:
+            siglip_embeddings = siglip_embeddings.to(device)
 
         logger.info(f"Merged arcface embeddings shape: {arcface_embeddings.shape}")
         logger.info(f"Merged siglip embeddings shape: {siglip_embeddings.shape}")
@@ -595,6 +659,22 @@ class WithAnyoneSamplerNode:
         # Generate image
         logger.info(f"Generating image of size {width}x{height} with {num_persons} person(s)")
 
+        # Move reference images to CPU to save GPU memory
+        ref_imgs_cpu = []
+        for img in ref_imgs:
+            if hasattr(img, 'cpu'):
+                ref_imgs_cpu.append(img.cpu())
+            else:
+                ref_imgs_cpu.append(img)
+
+        # Move embeddings to CPU if they're large
+        device = mm.get_torch_device()
+
+        # Check memory usage before generation
+        if torch.cuda.is_available():
+            before_gen_memory = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"Memory before generation: {before_gen_memory:.2f} GB")
+
         result_latent = pipeline(
             txt=conditioning[0][0],
             vec=conditioning[0][1].get("pooled_output"),
@@ -604,7 +684,7 @@ class WithAnyoneSamplerNode:
             guidance=4,
             num_steps=num_steps,
             seed=seed,
-            ref_imgs=ref_imgs,
+            ref_imgs=ref_imgs_cpu,  # Use CPU versions to save GPU memory
             arcface_embeddings=arcface_embeddings,
             siglip_embeddings=siglip_embeddings,
             bboxes=bboxes_batch,
