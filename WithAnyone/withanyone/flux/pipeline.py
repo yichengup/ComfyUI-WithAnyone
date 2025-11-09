@@ -211,9 +211,7 @@ class WithAnyonePipeline:
             )
 
         # self.siglip = SiglipEmbedding(siglip_path="google/siglip-base-patch16-256-i18n")
-
-        # Use FP16 instead of BF16 to reduce memory usage
-        self.model.to(torch.float16)
+        self.model.to(torch.bfloat16)
 
     def load_ckpt(self, ckpt_path):
         if ckpt_path is not None:
@@ -252,11 +250,10 @@ class WithAnyonePipeline:
         device_type = self.device if isinstance(self.device, str) else self.device.type
         if device_type == "mps":
             device_type = "cpu"  # for support macos mps
-        # Use float16 to match model dtype and save memory
-        txt = txt.to(torch.float16)
-        vec = vec.to(torch.float16)
+        txt = txt.to(torch.bfloat16)
+        vec = vec.to(torch.bfloat16)
         
-        with torch.autocast(enabled=self.use_fp8, device_type=device_type, dtype=torch.float16):
+        with torch.autocast(enabled=self.use_fp8, device_type=device_type, dtype=torch.bfloat16):
             return self.forward(
                 txt,
                 vec,
@@ -291,17 +288,9 @@ class WithAnyonePipeline:
         siglip_weight: float = 1.0,
         pbar = None,
     ):
-        # Enable aggressive memory management
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
-        # Ensure model is on correct device
-        if self.offload:
-            self.model = self.model.to(self.device)
-        
         x = get_noise(
             1, height, width, device=self.device,
-            dtype=torch.float16, seed=seed
+            dtype=torch.bfloat16, seed=seed
         )
         timesteps = get_schedule(
             num_steps,
@@ -316,22 +305,7 @@ class WithAnyonePipeline:
         # else:
         #     siglip_embeddings = self.siglip(ref_imgs).to(self.device, torch.bfloat16).permute(1,0,2,3)
         #     # num_ref, (1), n, d
-        # Process siglip embeddings in smaller chunks to save memory
-        if siglip_embeddings.numel() > 1000000:  # If more than 1M elements
-            # Process in chunks to save memory
-            chunk_size = siglip_embeddings.shape[0]
-            siglip_embeddings_list = []
-            for i in range(chunk_size):
-                chunk = siglip_embeddings[i:i+1].to(self.device, torch.float16)
-                siglip_embeddings_list.append(chunk)
-                # Clear cache between chunks
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            siglip_embeddings = torch.cat(siglip_embeddings_list, dim=0)
-        else:
-            siglip_embeddings = siglip_embeddings.to(self.device, torch.bfloat16)
-        
-        siglip_embeddings = siglip_embeddings.permute(1,0,2,3)
+        siglip_embeddings = siglip_embeddings.to(self.device, torch.bfloat16).permute(1,0,2,3)
  
         if arcface_embeddings is not None:
             arcface_embeddings =  arcface_embeddings.unsqueeze(1)
