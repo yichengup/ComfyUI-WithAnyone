@@ -142,8 +142,7 @@ class FluxParams:
 class SiglipEmbedding(nn.Module):
     def __init__(self, siglip_path = "google/siglip-base-patch16-256-i18n", use_matting=False):
         super().__init__()
-        # Use FP16 instead of BF16 to reduce memory usage
-        self.model = SiglipModel.from_pretrained(siglip_path).vision_model.to(torch.float16)
+        self.model = SiglipModel.from_pretrained(siglip_path).vision_model.to(torch.bfloat16)
         self.processor = AutoProcessor.from_pretrained(siglip_path)
         self.model.to(torch.cuda.current_device())
         
@@ -151,10 +150,7 @@ class SiglipEmbedding(nn.Module):
         self.use_matting = use_matting
         if self.use_matting:
             self.birefnet = AutoModelForImageSegmentation.from_pretrained(
-                'briaai/RMBG-2.0', trust_remote_code=True)
-            # Use float16 instead of bfloat16 to save memory
-            if torch.cuda.is_available():
-                self.birefnet = self.birefnet.to(torch.cuda.current_device(), dtype=torch.float16)
+                'briaai/RMBG-2.0', trust_remote_code=True).to(torch.cuda.current_device(), dtype=torch.bfloat16)
             # Apply half precision to the entire model after loading
             self.matting_transform = transforms.Compose([
                 # transforms.Resize((512, 512)),
@@ -170,12 +166,9 @@ class SiglipEmbedding(nn.Module):
         # Convert to input format and move to GPU
         input_image = self.matting_transform(image).unsqueeze(0).to(torch.cuda.current_device(), dtype=torch.bfloat16)
 
-        # Generate prediction with reduced precision
-        with torch.no_grad(), autocast(dtype=torch.float16):
+        # Generate prediction
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
             preds = self.birefnet(input_image)[-1].sigmoid().cpu()
-            # Clear cache to free memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
         
         # Process the mask
         pred = preds[0].squeeze().float()
