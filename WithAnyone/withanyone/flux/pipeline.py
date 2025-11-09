@@ -322,7 +322,7 @@ class WithAnyonePipeline:
             chunk_size = siglip_embeddings.shape[0]
             siglip_embeddings_list = []
             for i in range(chunk_size):
-                chunk = siglip_embeddings[i:i+1].to(self.device, torch.bfloat16)
+                chunk = siglip_embeddings[i:i+1].to(self.device, torch.float16)
                 siglip_embeddings_list.append(chunk)
                 # Clear cache between chunks
                 if torch.cuda.is_available():
